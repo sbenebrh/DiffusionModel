@@ -176,7 +176,27 @@ class GaussianDiffusion(nn.Module):
         #   4. Get the mean and std for q(x_{t-1} | x_t, x_0) using self.q_posterior,
         #      and sample x_{t-1}.
         ##################################################################
-        
+        # 1) Get model prediction
+        model_out = self.model(x=x_t, time=t, model_kwargs=model_kwargs)
+
+        # 2) Convert model output to x_start depending on objective
+        if self.objective == "pred_noise":
+            x_start = self.predict_start_from_noise(x_t, t, model_out)
+        else:
+            x_start = model_out
+
+        # 3) Clamp predicted x_start to valid range
+        x_start = x_start.clamp(-1.0, 1.0)
+
+        # 4) Sample from posterior q(x_{t-1} | x_t, x_0)
+        posterior_mean, posterior_std = self.q_posterior(x_start=x_start, x_t=x_t, t=t)
+
+        # no noise when t == 0
+        if (t == 0).all():
+            x_tm1 = posterior_mean
+        else:
+            noise = torch.randn_like(x_t)
+            x_tm1 = posterior_mean + posterior_std * noise
         ##################################################################
 
         return x_tm1
@@ -244,7 +264,10 @@ class GaussianDiffusion(nn.Module):
         # Finally, compute the weighted MSE loss.
         # Approximately 3-4 lines of code.
         ####################################################################
-
+        x_t = self.q_sample(x_start, t, noise)
+        model_out = self.model(x=x_t, time=t, model_kwargs=model_kwargs)
+        loss = ((model_out - target) ** 2) * loss_weight
+        loss = loss.mean()
         ####################################################################
 
         return loss
